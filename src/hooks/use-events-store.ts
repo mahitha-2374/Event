@@ -23,7 +23,11 @@ const useEventsStore = create<EventsState>()(
     (set, get) => ({
       events: [],
       _isHydrated: false,
-      setHydrated: () => set({ _isHydrated: true }),
+      setHydrated: () => {
+        if (!get()._isHydrated) { // Prevent unnecessary updates if already hydrated
+          set({ _isHydrated: true });
+        }
+      },
       addEvent: (eventData) => {
         const newEvent: CalendarEvent = { ...eventData, id: uuidv4() };
         set((state) => ({ events: [...state.events, newEvent] }));
@@ -48,12 +52,11 @@ const useEventsStore = create<EventsState>()(
         }));
       },
       getEventById: (eventId) => {
-        // Find original event if ID is an occurrence ID
         const originalEventId = eventId.includes('-occurrence-') ? eventId.split('-occurrence-')[0] : eventId;
         return get().events.find((event) => event.id === originalEventId);
       },
       getEventsForPeriod: (viewStart, viewEnd) => {
-        if (!get()._isHydrated) return []; // Don't compute if not hydrated
+        if (!get()._isHydrated) return [];
         const allEvents = get().events;
         const periodStart = startOfDay(viewStart);
         const periodEnd = endOfDay(viewEnd);
@@ -63,12 +66,12 @@ const useEventsStore = create<EventsState>()(
           if (event.recurrence && event.recurrence.frequency !== 'none') {
             occurrences.push(...generateRecurringEvents(event, periodStart, periodEnd));
           } else {
-            // Handle non-recurring events
             const eventStart = parseISO(event.start);
+            const eventEnd = parseISO(event.end);
              if (
-              (eventStart >= periodStart && eventStart <= periodEnd) || // Event starts within period
-              (parseISO(event.end) >= periodStart && parseISO(event.end) <= periodEnd) || // Event ends within period
-              (eventStart < periodStart && parseISO(event.end) > periodEnd) // Event spans over the period
+              (eventStart >= periodStart && eventStart <= periodEnd) ||
+              (eventEnd >= periodStart && eventEnd <= periodEnd) ||
+              (eventStart < periodStart && eventEnd > periodEnd)
             ) {
               occurrences.push(event);
             }
@@ -81,39 +84,43 @@ const useEventsStore = create<EventsState>()(
       name: 'eventide-calendar-events',
       storage: createJSONStorage(() => localStorage),
       onRehydrateStorage: () => (state) => {
-        if (state) state.setHydrated();
+        // This is called when rehydration is done.
+        // We ensure setHydrated is called here.
+        if (state) {
+          state.setHydrated();
+        }
       },
+      // Fallback for older versions or if onRehydrateStorage is not sufficient
+      // This will ensure _isHydrated is set eventually on the client.
+      // However, onRehydrateStorage should be the primary mechanism.
+      // Forcing hydration status like this might be redundant if onRehydrateStorage works as expected.
+      // Post-rehydration, if _isHydrated is still false, this is a safety net.
+      // hydratedState => {
+      //   if (hydratedState && !hydratedState._isHydrated) {
+      //     hydratedState.setHydrated();
+      //   }
+      // }
     }
   )
 );
 
-// Custom hook to ensure store is hydrated before use on client
 export const useHydratedEventsStore = <T>(selector: (state: EventsState) => T): T | undefined => {
   const state = useEventsStore(selector);
   const isHydrated = useEventsStore((s) => s._isHydrated);
   return isHydrated ? state : undefined;
 };
 
-// Hook to access the full store, ensuring hydration
 export const useEvents = () => {
   const store = useEventsStore();
   const isHydrated = useEventsStore((s) => s._isHydrated);
   
-  // On mount, explicitly call setHydrated if not already done by persist middleware
-  // This is a bit of a workaround for ensuring hydration status is set early
-  // React.useEffect(() => {
-  //  if (!isHydrated && typeof window !== 'undefined') {
-  //    store.setHydrated();
-  //  }
-  // }, [isHydrated, store]);
+  // The store itself now handles setting _isHydrated via onRehydrateStorage.
+  // No need for extra useEffect here or global calls.
 
   return { ...store, isHydrated };
 };
 
-
 export default useEventsStore;
 
-// Call setHydrated on initial client load, after store potentially rehydrated
-if (typeof window !== 'undefined') {
-  useEventsStore.getState().setHydrated();
-}
+// Removed global call: useEventsStore.getState().setHydrated();
+// onRehydrateStorage is the correct place for this.

@@ -1,15 +1,11 @@
 import type { Metadata } from 'next';
-import { GeistSans } from 'next/font/google'; // Corrected import
+import { GeistSans } from 'geist/font/sans'; // Corrected import from geist/font/sans
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster";
 import { AppProviders } from '@/components/layout/app-providers';
 
-const geistSans = GeistSans({ // Corrected usage
-  variable: '--font-geist-sans',
-  subsets: ['latin'],
-});
-
-// Removed Geist_Mono as it's not explicitly used in the prompt and GeistSans is preferred for UI
+// The GeistSans object from 'geist/font/sans' directly provides the .variable property
+// No need to initialize it like with next/font/google
 
 export const metadata: Metadata = {
   title: 'Eventide Calendar',
@@ -23,7 +19,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark"> {/* Apply dark theme by default */}
-      <body className={`${geistSans.variable} antialiased`}>
+      <body className={`${GeistSans.variable} antialiased`}> {/* Use GeistSans.variable directly */}
         <AppProviders>
           {children}
           <Toaster />

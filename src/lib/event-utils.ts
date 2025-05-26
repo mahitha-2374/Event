@@ -8,7 +8,7 @@ import {
   startOfDay,
   endOfDay,
   getDay as getDayOfWeek,
-  getDate as getDayOfMonth,
+  getDate as getDayOfMonthFn, // Renamed to avoid conflict with local getDayOfMonth
   isBefore,
   isAfter,
   isSameDay,
@@ -19,6 +19,10 @@ import {
   setMilliseconds,
   getHours,
   getMinutes,
+  differenceInCalendarDays,
+  differenceInCalendarWeeks,
+  differenceInCalendarMonths,
+  startOfWeek, // Added for weekly interval calculation
 } from 'date-fns';
 import { DATETIME_FORMAT } from './date-utils';
 
@@ -27,131 +31,121 @@ export function generateRecurringEvents(
   viewStartDate: Date,
   viewEndDate: Date
 ): CalendarEvent[] {
-  const { recurrence, start: baseStartStr, end: baseEndStr, id, title } = baseEvent;
-  if (!recurrence || recurrence.frequency === 'none') {
-    // For non-recurring events, check if it falls within the view
-    const singleEventStart = parseISO(baseStartStr);
-    if (isWithinInterval(singleEventStart, { start: viewStartDate, end: viewEndDate })) {
-      return [baseEvent];
-    }
-    return [];
-  }
+  const { recurrence, start: baseStartStr, end: baseEndStr, id } = baseEvent;
 
   const occurrences: CalendarEvent[] = [];
   const baseStartDate = parseISO(baseStartStr);
   const baseEndDate = parseISO(baseEndStr);
+
+  if (!isValidDate(baseStartDate) || !isValidDate(baseEndDate)) {
+    console.error("Invalid base event dates for event ID:", id);
+    return []; // Cannot process if base dates are invalid
+  }
+
   const durationMs = baseEndDate.getTime() - baseStartDate.getTime();
 
-  let currentDate = baseStartDate;
+  // Handle non-recurring events or events with 'none' recurrence explicitly
+  if (!recurrence || recurrence.frequency === 'none') {
+    // Check if the single event instance overlaps with the view period
+    if (
+      isWithinInterval(baseStartDate, { start: viewStartDate, end: viewEndDate }) ||
+      isWithinInterval(baseEndDate, { start: viewStartDate, end: viewEndDate }) ||
+      (isBefore(baseStartDate, viewStartDate) && isAfter(baseEndDate, viewEndDate))
+    ) {
+      occurrences.push(baseEvent);
+    }
+    return occurrences;
+  }
+  
+  let currentDate = startOfDay(baseStartDate); // Start iterating from the base event's date (day part)
   const recurrenceEndDate = recurrence.endDate ? parseISO(recurrence.endDate) : null;
 
-  const maxIterations = 365 * 2; // Limit iterations to prevent infinite loops for up to 2 years of daily events
+  const maxIterations = 365 * 3; // Limit iterations (e.g., 3 years of daily events)
   let iterationCount = 0;
 
-  while (isBefore(currentDate, endOfDay(viewEndDate)) && iterationCount < maxIterations) {
+  while (iterationCount < maxIterations) {
     iterationCount++;
 
-    if (recurrenceEndDate && isAfter(currentDate, recurrenceEndDate)) {
+    if (isAfter(currentDate, endOfDay(viewEndDate)) && (!recurrenceEndDate || isAfter(currentDate, recurrenceEndDate))) {
+      // If current date is already past both view end and recurrence end, no need to continue
       break;
     }
-
-    // Check if the current occurrence's start date is within the view window or later
-    // This ensures we don't generate events too far in the past
-    if (isAfter(currentDate, viewEndDate) && !isSameDay(currentDate, viewEndDate) && recurrence.frequency !== 'none') {
-       // For recurring events, if current date is past view window, may stop early
-       // unless it's the first event which might have started before view
-       if (occurrences.length > 0 || isAfter(startOfDay(currentDate), startOfDay(viewEndDate))) break;
+    
+    if (recurrenceEndDate && isAfter(startOfDay(currentDate), startOfDay(recurrenceEndDate))) {
+      break; // Stop if current date is past the recurrence end date
     }
 
-    const currentEventStart = new Date(currentDate);
-    currentEventStart.setHours(getHours(baseStartDate), getMinutes(baseStartDate), baseStartDate.getSeconds(), baseStartDate.getMilliseconds());
-    
-    const currentEventEnd = new Date(currentEventStart.getTime() + durationMs);
+    // Skip dates that are definitely too early to be relevant for the view window
+    // (e.g., if base event starts much later than current view, but this might be complex)
+    // For now, the main `while` condition using `viewEndDate` and `recurrenceEndDate` is key.
 
-    // Check if this specific occurrence should be generated based on recurrence rule
-    let shouldGenerate = false;
-    switch (recurrence.frequency) {
-      case 'daily':
-        shouldGenerate = true;
-        break;
-      case 'weekly':
-        if (recurrence.daysOfWeek?.includes(getDayOfWeek(currentDate))) {
-          shouldGenerate = true;
-        }
-        break;
-      case 'monthly':
-        if (recurrence.dayOfMonth === getDayOfMonth(currentDate)) {
-          shouldGenerate = true;
-        }
-        break;
+    let shouldGenerateThisIteration = false;
+    const interval = recurrence.interval && recurrence.interval > 0 ? recurrence.interval : 1;
+
+    // Only consider dates on or after the base start date for generating occurrences
+    if (isSameDay(currentDate, baseStartDate) || isAfter(currentDate, baseStartDate)) {
+      switch (recurrence.frequency) {
+        case 'daily':
+          if (differenceInCalendarDays(currentDate, baseStartDate) % interval === 0) {
+            shouldGenerateThisIteration = true;
+          }
+          break;
+        case 'weekly':
+          if (recurrence.daysOfWeek?.includes(getDayOfWeek(currentDate))) {
+            // Check if this week is an "interval week"
+            // Compare the week of currentDate with the week of baseStartDate
+            if (differenceInCalendarWeeks(startOfWeek(currentDate), startOfWeek(baseStartDate), { weekStartsOn: getDayOfWeek(baseStartDate) as any }) % interval === 0) {
+               shouldGenerateThisIteration = true;
+            }
+          }
+          break;
+        case 'monthly':
+          if (recurrence.dayOfMonth === getDayOfMonthFn(currentDate)) {
+            if (differenceInCalendarMonths(currentDate, baseStartDate) % interval === 0) {
+              shouldGenerateThisIteration = true;
+            }
+          }
+          break;
+      }
     }
-    
-    if (shouldGenerate && isAfter(currentEventStart, startOfDay(addDays(viewStartDate, -1))) && isBefore(currentEventStart, endOfDay(addDays(viewEndDate,1)))) {
-       if (isWithinInterval(currentEventStart, { start: viewStartDate, end: viewEndDate }) || 
-           isWithinInterval(currentEventEnd, { start: viewStartDate, end: viewEndDate }) ||
-           (isBefore(currentEventStart, viewStartDate) && isAfter(currentEventEnd, viewEndDate))) {
+
+    if (shouldGenerateThisIteration) {
+      const occurrenceStartDateTime = setMilliseconds(setSeconds(setMinutes(setHours(currentDate, getHours(baseStartDate)), getMinutes(baseStartDate)), baseStartDate.getSeconds()), baseStartDate.getMilliseconds());
+      const occurrenceEndDateTime = new Date(occurrenceStartDateTime.getTime() + durationMs);
+
+      // Check if this generated occurrence overlaps with the view window
+      if (
+        isWithinInterval(occurrenceStartDateTime, { start: viewStartDate, end: viewEndDate }) ||
+        isWithinInterval(occurrenceEndDateTime, { start: viewStartDate, end: viewEndDate }) ||
+        (isBefore(occurrenceStartDateTime, viewStartDate) && isAfter(occurrenceEndDateTime, viewEndDate))
+      ) {
         occurrences.push({
           ...baseEvent,
-          id: `${id}-occurrence-${format(currentEventStart, 'yyyyMMddHHmmss')}`, // Unique ID for occurrence
-          start: format(currentEventStart, DATETIME_FORMAT),
-          end: format(currentEventEnd, DATETIME_FORMAT),
-          // Marking it as an instance might be useful, but not strictly required by type
+          id: `${id}-occurrence-${format(occurrenceStartDateTime, 'yyyyMMddHHmmss')}`,
+          start: format(occurrenceStartDateTime, DATETIME_FORMAT),
+          end: format(occurrenceEndDateTime, DATETIME_FORMAT),
         });
       }
     }
     
-    // Advance to the next potential date based on frequency and interval
-    const interval = recurrence.interval || 1;
-    switch (recurrence.frequency) {
-      case 'daily':
-        currentDate = addDays(currentDate, interval);
+    // Optimization: if currentDate is already way past viewEndDate and we haven't found anything, break.
+    // The main check for this is the `while` condition and the break for `recurrenceEndDate`.
+    // Add a safety break if iterationCount gets too high without advancing past view window significantly.
+    if (isAfter(currentDate, addMonths(viewEndDate, 3)) && occurrences.length === 0 && iterationCount > 100) {
+        // If we are 3 months past view and still found nothing after 100 days, likely safe to break.
+        // This is a heuristic to prevent extremely long loops for misconfigured recurrences far in future.
         break;
-      case 'weekly':
-        // if an event is weekly, but we started on a day not in daysOfWeek, advance to next day
-        // otherwise, advance by interval weeks if it was generated, or by 1 day if not.
-        if (shouldGenerate) {
-            currentDate = addWeeks(currentDate, interval);
-        } else {
-            currentDate = addDays(currentDate, 1); 
-            // This ensures we find the next valid day if interval > 1 week and current day is not in daysOfWeek
-            // For weekly with interval 1, it will find next valid day if today is not it.
-            // More robust: currentDate = addDays(currentDate, 1) and then check.
-            // Or, if generated, add interval weeks, if not, add 1 day.
-            // If the event was generated or its original day of week matches one of daysOfWeek, advance by interval weeks
-            // Otherwise, advance by 1 day to find the next valid start day.
-            // This logic needs to be careful to not skip valid occurrences if interval > 1.
-            // Simpler approach: always advance by 1 day and let the rule check.
-            // Or for weekly, if generated, advance by interval weeks from *this* day. If not generated, advance by 1 day.
-            // This simplified version advances current date by 1 day if it wasn't in daysOfWeek,
-            // or by interval weeks if it was.
-            // A more correct way is to find the next valid dayOfWeek if this one isn't it.
-            // For simplicity now, if it's a valid day, we advance by weeks. If not, by day.
-            // This may not be perfect for interval > 1 and first day not matching.
-             if (recurrence.daysOfWeek?.includes(getDayOfWeek(currentDate))) {
-                currentDate = addWeeks(currentDate, interval);
-             } else {
-                currentDate = addDays(currentDate, 1);
-             }
-        }
-        break;
-      case 'monthly':
-        // For monthly, if generated, advance by interval months. If not, advance by 1 day to find next valid dayOfMonth.
-        // This isn't perfect. Correctly finding "next Xth of month" with interval is complex.
-        if (recurrence.dayOfMonth === getDayOfMonth(currentDate)) {
-            currentDate = addMonths(currentDate, interval);
-        } else {
-            currentDate = addDays(currentDate, 1);
-        }
-        // Ensure dayOfMonth is respected after adding months if it lands on a different day (e.g. 31st in Feb)
-        // This part is complex and often handled by libraries like rrule.js.
-        // For now, this simplified logic might miss some edge cases for monthly.
-        break;
-      default: // Should not happen with 'none' handled
-        return occurrences;
     }
+
+    currentDate = addDays(currentDate, 1); // Always advance by one day
   }
   return occurrences;
 }
+
+function isValidDate(d: any): d is Date {
+  return d instanceof Date && !isNaN(d.getTime());
+}
+
 
 export function sortEvents(events: CalendarEvent[]): CalendarEvent[] {
   return events.sort((a, b) => {
@@ -160,9 +154,13 @@ export function sortEvents(events: CalendarEvent[]): CalendarEvent[] {
     if (startA !== startB) {
       return startA - startB;
     }
-    // If starts are same, sort by duration (shorter first) or title
     const endA = parseISO(a.end).getTime();
     const endB = parseISO(b.end).getTime();
-    return (endA - startA) - (endB - startB) || a.title.localeCompare(b.title);
+    const durationA = endA - startA;
+    const durationB = endB - startB;
+    if (durationA !== durationB) {
+      return durationA - durationB; // Shorter events first
+    }
+    return a.title.localeCompare(b.title);
   });
 }
