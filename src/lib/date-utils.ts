@@ -99,7 +99,6 @@ export function combineDateAndTime(date: Date, time: { hours: number; minutes: n
   newDate = setMilliseconds(newDate, 0);
   return newDate;
 }
-
 export function getEventDurationMinutes(start: string, end: string): number {
   const startDate = parseISO(start);
   const endDate = parseISO(end);
