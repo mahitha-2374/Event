@@ -15,7 +15,6 @@ The **Event Calendar** is a simple yet powerful tool designed to help users mana
 - **Optional integration** with external calendars (e.g., Google Calendar, Outlook).
 
 
-Got it! You want a **more clean, appealing, and properly structured version**, where instructions are **formatted for a GitHub README**, but **not as one big code block**. Let me give you a **normal, Markdown-friendly version** that looks polished, clear, and visually appealing when rendered on GitHub:
 
 ---
 
