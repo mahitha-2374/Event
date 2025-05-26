@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState } from 'react';
@@ -11,12 +12,12 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { CalendarIcon, Sparkles, Clock } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { format, parseISO, setHours, setMinutes, isValid as isValidDate } from 'date-fns';
+import { format, parseISO, setHours, setMinutes, isValid as isValidDate, addDays, startOfDay, endOfDay } from 'date-fns'; // Direct import for what's used in this file
 import { useEvents } from '@/hooks/use-events-store';
 import { suggestAvailableTimeSlots, SuggestAvailableTimeSlotsInput } from '@/ai/flows/suggest-available-time-slots';
 import { useToast } from '@/hooks/use-toast';
-import type { CalendarEvent } from '@/types/event';
-import { DATETIME_FORMAT } from '@/lib/date-utils';
+// import type { CalendarEvent } from '@/types/event'; // Not directly used
+import { DATETIME_FORMAT } from '@/lib/date-utils'; // Keep this for formatting output to AI
 
 const smartScheduleSchema = z.object({
   durationMinutes: z.coerce.number().min(5, 'Duration must be at least 5 minutes'),
@@ -50,7 +51,7 @@ export function SmartScheduleForm({ onSuggestions }: SmartScheduleFormProps) {
     resolver: zodResolver(smartScheduleSchema),
     defaultValues: {
       durationMinutes: 30,
-      preferredDate: new Date(),
+      // preferredDate: new Date(), // Let it be undefined by default, so user explicitly chooses or it searches wider
     },
   });
   const { control, handleSubmit, watch, formState: { errors } } = form;
@@ -59,8 +60,17 @@ export function SmartScheduleForm({ onSuggestions }: SmartScheduleFormProps) {
   const onSubmit = async (data: SmartScheduleFormValues) => {
     setIsLoading(true);
     
-    const searchStartDate = data.preferredDate ? setHours(setMinutes(data.preferredDate,0),0) : new Date();
-    const searchEndDate = data.preferredDate ? setHours(setMinutes(data.preferredDate,59),23) : new Date(); // For simplicity, search on preferred date
+    let searchStartDate: Date;
+    let searchEndDate: Date;
+
+    if (data.preferredDate) {
+      searchStartDate = startOfDay(data.preferredDate);
+      searchEndDate = endOfDay(data.preferredDate);
+    } else {
+      // If no preferred date, search over the next 7 days
+      searchStartDate = startOfDay(new Date());
+      searchEndDate = endOfDay(addDays(new Date(), 7));
+    }
 
     const existingEventsRaw = getEventsForPeriod(searchStartDate, searchEndDate);
     const existingEvents = existingEventsRaw.map(e => ({
@@ -119,11 +129,26 @@ export function SmartScheduleForm({ onSuggestions }: SmartScheduleFormProps) {
                   className={cn("w-full justify-start text-left font-normal", !field.value && "text-muted-foreground")}
                 >
                   <CalendarIcon className="mr-2 h-4 w-4" />
-                  {field.value ? format(field.value, 'PPP') : <span>Pick a date</span>}
+                  {field.value ? format(field.value, 'PPP') : <span>Pick a date (or leave blank for suggestions)</span>}
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0">
-                <Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus />
+                <Calendar 
+                  mode="single" 
+                  selected={field.value} 
+                  onSelect={field.onChange} 
+                  initialFocus 
+                  footer={
+                    <Button 
+                      variant="ghost" 
+                      className="w-full mt-2" 
+                      onClick={() => field.onChange(undefined)}
+                      disabled={!field.value}
+                    >
+                      Clear Date
+                    </Button>
+                  }
+                />
               </PopoverContent>
             </Popover>
           )}
@@ -133,12 +158,12 @@ export function SmartScheduleForm({ onSuggestions }: SmartScheduleFormProps) {
       {preferredDate && (
         <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-                <Label htmlFor="preferredStartTime">Preferred Start Time (optional)</Label>
+                <Label htmlFor="preferredStartTime">Preferred Start Time (on selected date)</Label>
                 <Input id="preferredStartTime" type="time" {...form.register('preferredStartTime')} />
                  {errors.preferredStartTime && <p className="text-sm text-destructive">{errors.preferredStartTime.message}</p>}
             </div>
             <div className="space-y-2">
-                <Label htmlFor="preferredEndTime">Preferred End Time (optional)</Label>
+                <Label htmlFor="preferredEndTime">Preferred End Time (on selected date)</Label>
                 <Input id="preferredEndTime" type="time" {...form.register('preferredEndTime')} />
                 {errors.preferredEndTime && <p className="text-sm text-destructive">{errors.preferredEndTime.message}</p>}
             </div>

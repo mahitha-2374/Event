@@ -26,6 +26,8 @@ import {
   isAfter,
   getDay,
   getDate as getDayOfMonthFn,
+  startOfDay, // Added
+  endOfDay,   // Added
 } from 'date-fns';
 import type { CalendarEvent, RecurrenceRule } from '@/types/event';
 
@@ -86,6 +88,8 @@ export {
   differenceInCalendarMonths,
   isBefore,
   isAfter,
+  startOfDay, // Added
+  endOfDay,   // Added
 };
 
 export function combineDateAndTime(date: Date, time: { hours: number; minutes: number }): Date {
