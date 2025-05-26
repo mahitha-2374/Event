@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useEffect } from 'react';
@@ -25,7 +26,12 @@ import { useEvents } from '@/hooks/use-events-store';
 import type { CalendarEvent, RecurrenceFrequency, RecurrenceRule } from '@/types/event';
 import { EVENT_COLORS, DEFAULT_EVENT_COLOR } from './event-colors';
 import { useToast } from '@/hooks/use-toast';
-import { DATETIME_FORMAT } from '@/lib/date-utils';
+import {
+  DATETIME_FORMAT,
+  getHours,
+  // getMinutes, // Not strictly used in this form's default logic but good to be aware of
+  getDayOfMonthFn
+} from '@/lib/date-utils';
 
 const eventFormSchema = z.object({
   title: z.string().min(1, 'Title is required'),
@@ -71,30 +77,52 @@ export function EventForm({ event, initialDate, onClose, onDelete }: EventFormPr
   const { addEvent, updateEvent } = useEvents();
   const { toast } = useToast();
 
-  const defaultStartTime = initialDate ? format(initialDate, 'HH:mm') : '09:00';
-  const defaultEndTime = initialDate 
-    ? format(setHours(initialDate, getHours(initialDate) + 1), 'HH:mm') 
-    : '10:00';
+  // Calculate initial default values for useForm
+  const getInitialFormValues = (): EventFormValues => {
+    const baseDateForNew = initialDate || new Date();
+    const defaultStartTimeString = format(baseDateForNew, 'HH:mm');
+    const defaultEndTimeString = format(setHours(baseDateForNew, getHours(baseDateForNew) + 1), 'HH:mm');
 
-  const defaultValues: EventFormValues = {
-    title: event?.title || '',
-    description: event?.description || '',
-    allDay: event?.allDay || false,
-    startDate: event ? parseISO(event.start) : initialDate || new Date(),
-    startTime: event && !event.allDay ? format(parseISO(event.start), 'HH:mm') : defaultStartTime,
-    endDate: event ? parseISO(event.end) : initialDate || new Date(),
-    endTime: event && !event.allDay ? format(parseISO(event.end), 'HH:mm') : defaultEndTime,
-    color: event?.color || DEFAULT_EVENT_COLOR,
-    recurrenceFrequency: event?.recurrence?.frequency || 'none',
-    recurrenceInterval: event?.recurrence?.interval || 1,
-    recurrenceDaysOfWeek: event?.recurrence?.daysOfWeek || [],
-    recurrenceDayOfMonth: event?.recurrence?.dayOfMonth || (event ? getDayOfMonth(parseISO(event.start)) : getDayOfMonth(initialDate || new Date())),
-    recurrenceEndDate: event?.recurrence?.endDate ? parseISO(event.recurrence.endDate) : undefined,
+    if (event) {
+      const eventStartDate = parseISO(event.start);
+      const eventEndDate = parseISO(event.end);
+      return {
+        title: event.title || '',
+        description: event.description || '',
+        allDay: event.allDay || false,
+        startDate: isValidDate(eventStartDate) ? eventStartDate : baseDateForNew,
+        startTime: !event.allDay && isValidDate(eventStartDate) ? format(eventStartDate, 'HH:mm') : defaultStartTimeString,
+        endDate: isValidDate(eventEndDate) ? eventEndDate : baseDateForNew,
+        endTime: !event.allDay && isValidDate(eventEndDate) ? format(eventEndDate, 'HH:mm') : defaultEndTimeString,
+        color: event.color || DEFAULT_EVENT_COLOR,
+        recurrenceFrequency: event.recurrence?.frequency || 'none',
+        recurrenceInterval: event.recurrence?.interval || 1,
+        recurrenceDaysOfWeek: event.recurrence?.daysOfWeek || [],
+        recurrenceDayOfMonth: event.recurrence?.dayOfMonth || (isValidDate(eventStartDate) ? getDayOfMonthFn(eventStartDate) : getDayOfMonthFn(baseDateForNew)),
+        recurrenceEndDate: event.recurrence?.endDate ? parseISO(event.recurrence.endDate) : undefined,
+      };
+    } else {
+      return {
+        title: '',
+        description: '',
+        allDay: false,
+        startDate: baseDateForNew,
+        startTime: defaultStartTimeString,
+        endDate: baseDateForNew,
+        endTime: defaultEndTimeString,
+        color: DEFAULT_EVENT_COLOR,
+        recurrenceFrequency: 'none',
+        recurrenceInterval: 1,
+        recurrenceDaysOfWeek: [],
+        recurrenceDayOfMonth: getDayOfMonthFn(baseDateForNew),
+        recurrenceEndDate: undefined,
+      };
+    }
   };
 
   const form = useForm<EventFormValues>({
     resolver: zodResolver(eventFormSchema),
-    defaultValues,
+    defaultValues: getInitialFormValues(),
   });
 
   const { control, handleSubmit, watch, setValue, formState: { errors } } = form;
@@ -102,28 +130,54 @@ export function EventForm({ event, initialDate, onClose, onDelete }: EventFormPr
   const recurrenceFrequency = watch('recurrenceFrequency');
 
   useEffect(() => {
+    const baseDateForNew = initialDate || new Date();
+    const defaultStartTimeString = format(baseDateForNew, 'HH:mm');
+    const defaultEndTimeString = format(setHours(baseDateForNew, getHours(baseDateForNew) + 1), 'HH:mm');
+
     if (event) {
-        form.reset(defaultValues);
-    } else if (initialDate) {
+        const eventStartDate = parseISO(event.start);
+        const eventEndDate = parseISO(event.end);
         form.reset({
-            ...defaultValues,
-            startDate: initialDate,
-            endDate: initialDate,
-            startTime: defaultStartTime,
-            endTime: defaultEndTime,
-            recurrenceDayOfMonth: getDayOfMonth(initialDate)
+            title: event.title || '',
+            description: event.description || '',
+            allDay: event.allDay || false,
+            startDate: isValidDate(eventStartDate) ? eventStartDate : baseDateForNew,
+            startTime: !event.allDay && isValidDate(eventStartDate) ? format(eventStartDate, 'HH:mm') : defaultStartTimeString,
+            endDate: isValidDate(eventEndDate) ? eventEndDate : baseDateForNew,
+            endTime: !event.allDay && isValidDate(eventEndDate) ? format(eventEndDate, 'HH:mm') : defaultEndTimeString,
+            color: event.color || DEFAULT_EVENT_COLOR,
+            recurrenceFrequency: event.recurrence?.frequency || 'none',
+            recurrenceInterval: event.recurrence?.interval || 1,
+            recurrenceDaysOfWeek: event.recurrence?.daysOfWeek || [],
+            recurrenceDayOfMonth: event.recurrence?.dayOfMonth || (isValidDate(eventStartDate) ? getDayOfMonthFn(eventStartDate) : getDayOfMonthFn(baseDateForNew)),
+            recurrenceEndDate: event.recurrence?.endDate ? parseISO(event.recurrence.endDate) : undefined,
+        });
+    } else { // Handles both initialDate presence and null/undefined initialDate
+        form.reset({
+            title: '',
+            description: '',
+            allDay: false,
+            startDate: baseDateForNew,
+            startTime: defaultStartTimeString,
+            endDate: baseDateForNew,
+            endTime: defaultEndTimeString,
+            color: DEFAULT_EVENT_COLOR,
+            recurrenceFrequency: 'none',
+            recurrenceInterval: 1,
+            recurrenceDaysOfWeek: [],
+            recurrenceDayOfMonth: getDayOfMonthFn(baseDateForNew),
+            recurrenceEndDate: undefined,
         });
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [event, initialDate, form.reset]);
+  }, [event, initialDate, form, getHours, getDayOfMonthFn]);
 
 
   const onSubmit = (data: EventFormValues) => {
-    const startDateTime = data.allDay 
-      ? setHours(setMinutes(data.startDate,0),0) 
+    const startDateTime = data.allDay
+      ? setHours(setMinutes(data.startDate,0),0)
       : setMinutes(setHours(data.startDate, parseInt(data.startTime!.split(':')[0])), parseInt(data.startTime!.split(':')[1]));
-    
-    const endDateTime = data.allDay 
+
+    const endDateTime = data.allDay
       ? setHours(setMinutes(data.endDate,59),23)
       : setMinutes(setHours(data.endDate, parseInt(data.endTime!.split(':')[0])), parseInt(data.endTime!.split(':')[1]));
 
@@ -134,7 +188,7 @@ export function EventForm({ event, initialDate, onClose, onDelete }: EventFormPr
       dayOfMonth: data.recurrenceFrequency === 'monthly' ? data.recurrenceDayOfMonth : undefined,
       endDate: data.recurrenceEndDate ? format(data.recurrenceEndDate, DATETIME_FORMAT) : undefined,
     };
-    
+
     const eventData = {
       title: data.title,
       description: data.description,
@@ -167,7 +221,7 @@ export function EventForm({ event, initialDate, onClose, onDelete }: EventFormPr
         <Label htmlFor="description">Description</Label>
         <Textarea id="description" {...form.register('description')} placeholder="Optional details" />
       </div>
-      
+
       <div className="flex items-center space-x-2">
         <Controller
             name="allDay"
@@ -196,7 +250,7 @@ export function EventForm({ event, initialDate, onClose, onDelete }: EventFormPr
                     )}
                   >
                     <CalendarIcon className="mr-2 h-4 w-4" />
-                    {field.value ? format(field.value, 'PPP') : <span>Pick a date</span>}
+                    {field.value && isValidDate(field.value) ? format(field.value, 'PPP') : <span>Pick a date</span>}
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-auto p-0">
@@ -233,7 +287,7 @@ export function EventForm({ event, initialDate, onClose, onDelete }: EventFormPr
                     )}
                   >
                     <CalendarIcon className="mr-2 h-4 w-4" />
-                    {field.value ? format(field.value, 'PPP') : <span>Pick a date</span>}
+                    {field.value && isValidDate(field.value) ? format(field.value, 'PPP') : <span>Pick a date</span>}
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-auto p-0">
@@ -304,10 +358,12 @@ export function EventForm({ event, initialDate, onClose, onDelete }: EventFormPr
         <>
           <div className="space-y-2">
             <Label htmlFor="recurrenceInterval">Repeat every</Label>
-            <Input id="recurrenceInterval" type="number" min="1" {...form.register('recurrenceInterval')} />
-            <span className="text-sm text-muted-foreground ml-2">
-                {recurrenceFrequency === 'daily' ? 'day(s)' : recurrenceFrequency === 'weekly' ? 'week(s)' : 'month(s)'}
-            </span>
+            <div className="flex items-center">
+              <Input id="recurrenceInterval" type="number" min="1" {...form.register('recurrenceInterval')} className="w-auto flex-grow"/>
+              <span className="text-sm text-muted-foreground ml-2">
+                  {recurrenceFrequency === 'daily' ? 'day(s)' : recurrenceFrequency === 'weekly' ? 'week(s)' : 'month(s)'}
+              </span>
+            </div>
             {errors.recurrenceInterval && <p className="text-sm text-destructive">{errors.recurrenceInterval.message}</p>}
           </div>
 
@@ -349,11 +405,11 @@ export function EventForm({ event, initialDate, onClose, onDelete }: EventFormPr
                     name="recurrenceDayOfMonth"
                     control={control}
                     render={({ field }) => (
-                        <Input 
-                            id="recurrenceDayOfMonth" 
-                            type="number" 
-                            min="1" 
-                            max="31" 
+                        <Input
+                            id="recurrenceDayOfMonth"
+                            type="number"
+                            min="1"
+                            max="31"
                             value={field.value}
                             onChange={field.onChange}
                         />
@@ -362,7 +418,7 @@ export function EventForm({ event, initialDate, onClose, onDelete }: EventFormPr
                 {errors.recurrenceDayOfMonth && <p className="text-sm text-destructive">{errors.recurrenceDayOfMonth.message}</p>}
             </div>
           )}
-        
+
           <div className="space-y-2">
             <Label htmlFor="recurrenceEndDate">Ends on (optional)</Label>
             <Controller
@@ -379,7 +435,7 @@ export function EventForm({ event, initialDate, onClose, onDelete }: EventFormPr
                         )}
                     >
                         <CalendarIcon className="mr-2 h-4 w-4" />
-                        {field.value ? format(field.value, 'PPP') : <span>Never</span>}
+                        {field.value && isValidDate(field.value) ? format(field.value, 'PPP') : <span>Never</span>}
                     </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0">
@@ -412,22 +468,4 @@ export function EventForm({ event, initialDate, onClose, onDelete }: EventFormPr
   );
 }
 
-// Helper to get day of month, safely
-function getDayOfMonth(date: Date): number {
-    if (isValidDate(date)) {
-        return parseInt(format(date, 'd'), 10);
-    }
-    return 1; // Default
-}
-function getHours(date: Date): number {
-    if (isValidDate(date)) {
-        return parseInt(format(date, 'HH'), 10);
-    }
-    return 0;
-}
-function getMinutes(date: Date): number {
-    if(isValidDate(date)) {
-        return parseInt(format(date, 'mm'), 10);
-    }
-    return 0;
-}
+    
