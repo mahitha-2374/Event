@@ -7,6 +7,7 @@ import { AppProviders } from '@/components/layout/app-providers';
 // The GeistSans object from 'geist/font/sans' directly provides the .variable property
 // No need to initialize it like with next/font/google
 
+
 export const metadata: Metadata = {
   title: 'Eventide Calendar',
   description: 'A smart calendar application with AI scheduling assistant.',
