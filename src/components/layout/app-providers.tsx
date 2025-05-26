@@ -1,5 +1,4 @@
 "use client";
-
 import React from 'react';
 // No need for useEventsStore or useState/useEffect for hydration here,
 // as child components (like HomePage) will use useEvents().isHydrated
